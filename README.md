@@ -14,7 +14,6 @@ Daily OceanEngine Yuntu bid ranking automation.
 ## Setup
 
 ```powershell
-cd yuntu_report
 pip install -r requirements.txt
 playwright install chromium
 copy .env.yuntu.example .env.yuntu
