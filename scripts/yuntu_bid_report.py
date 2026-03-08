@@ -4,6 +4,7 @@ import os
 import smtplib
 import sys
 import time
+from urllib.parse import parse_qs, urlparse
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from email.mime.multipart import MIMEMultipart
@@ -73,7 +74,7 @@ class EmailConfig:
     smtp_port: int
     sender_email: str
     sender_password: str
-    recipient_email: str
+    recipient_emails: List[str]
     use_tls: bool = True
     use_ssl: bool = False
 
@@ -92,13 +93,23 @@ class DataNotReadyError(Exception):
     pass
 
 
+@dataclass
+class DateAvailability:
+    end_date: str
+    update_time: str
+
+
 def load_email_config() -> EmailConfig:
+    raw_recipients = os.getenv("MAIL_TO", DEFAULT_RECIPIENT)
+    recipient_emails = [item.strip() for item in raw_recipients.replace(";", ",").split(",") if item.strip()]
+    if not recipient_emails:
+        recipient_emails = [DEFAULT_RECIPIENT]
     return EmailConfig(
         smtp_host=os.getenv("SMTP_HOST", "smtp.example.com"),
         smtp_port=int(os.getenv("SMTP_PORT", "587")),
         sender_email=os.getenv("SMTP_SENDER", "YOUR_EMAIL@example.com"),
         sender_password=os.getenv("SMTP_PASSWORD", "YOUR_PASSWORD"),
-        recipient_email=os.getenv("MAIL_TO", DEFAULT_RECIPIENT),
+        recipient_emails=recipient_emails,
         use_tls=os.getenv("SMTP_USE_TLS", "true").lower() == "true",
         use_ssl=os.getenv("SMTP_USE_SSL", "false").lower() == "true",
     )
@@ -147,7 +158,7 @@ def send_email(subject: str, html_body: str, email_config: EmailConfig) -> None:
     message = MIMEMultipart("alternative")
     message["Subject"] = subject
     message["From"] = email_config.sender_email
-    message["To"] = email_config.recipient_email
+    message["To"] = ", ".join(email_config.recipient_emails)
     message.attach(MIMEText(html_body, "html", "utf-8"))
 
     smtp_cls = smtplib.SMTP_SSL if email_config.use_ssl else smtplib.SMTP
@@ -158,7 +169,7 @@ def send_email(subject: str, html_body: str, email_config: EmailConfig) -> None:
             server.login(email_config.sender_email, email_config.sender_password)
         server.sendmail(
             email_config.sender_email,
-            [email_config.recipient_email],
+            email_config.recipient_emails,
             message.as_string(),
         )
 
@@ -328,6 +339,30 @@ def wait_for_table(page: Page) -> None:
     raise RuntimeError(f"Data table did not load. last_error={last_error}")
 
 
+def get_latest_available_date(page: Page) -> DateAvailability:
+    aadvid = parse_qs(urlparse(page.url).query).get("aadvid", [""])[0]
+    if not aadvid:
+        raise RuntimeError(f"aadvid is missing in page url: {page.url}")
+    result = page.evaluate(
+        """
+        async ({ aadvid }) => {
+          const resp = await fetch(`/yuntu_biz/api/common/QueryDateRange?aadvid=${encodeURIComponent(aadvid)}&module_=19010&date_type=10`, {
+            credentials: 'include',
+          });
+          return await resp.json();
+        }
+        """,
+        {"aadvid": aadvid},
+    )
+    data = (result or {}).get("data") or {}
+    end_date = str(data.get("end_date") or "").strip()
+    update_time = str(data.get("update_time") or "").strip()
+    if not end_date:
+        raise RuntimeError(f"QueryDateRange returned unexpected payload: {result}")
+    logging.info("Latest available end_date=%s update_time=%s", end_date, update_time or "N/A")
+    return DateAvailability(end_date=end_date, update_time=update_time)
+
+
 def set_yesterday_filter(page: Page, report_date: date) -> None:
     report_text = report_date.strftime("%Y-%m-%d")
     try:
@@ -434,6 +469,14 @@ def apply_filters(page: Page, report_date: date) -> None:
     page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_load_state("networkidle", timeout=30000)
 
+    availability = get_latest_available_date(page)
+    expected_date = report_date.strftime("%Y-%m-%d")
+    if availability.end_date != expected_date:
+        raise DataNotReadyError(
+            f"Latest available date is {availability.end_date}, expected {expected_date}. "
+            f"Source update_time={availability.update_time or 'N/A'}."
+        )
+
     # The direct URL already lands on the bid ranking page in the current UI, but keep
     # a lightweight confirmation click for resilience if the left-side list renders later.
     for selector in [
@@ -476,31 +519,6 @@ def apply_filters(page: Page, report_date: date) -> None:
 
     page.wait_for_load_state("networkidle", timeout=30000)
     wait_for_table(page)
-
-
-def page_contains_report_date(page: Page, report_date: date) -> bool:
-    variants = {
-        report_date.strftime("%Y-%m-%d"),
-        report_date.strftime("%Y/%m/%d"),
-        report_date.strftime("%Y.%m.%d"),
-        report_date.strftime("%m-%d"),
-        report_date.strftime("%m/%d"),
-    }
-    content = page.content()
-    for variant in variants:
-        if variant in content:
-            logging.info("Detected report date marker in page content: %s", variant)
-            return True
-    try:
-        input_count = page.locator("input").count()
-        for index in range(input_count):
-            value = page.locator("input").nth(index).input_value(timeout=500)
-            if value in variants:
-                logging.info("Detected report date marker in date input value: %s", value)
-                return True
-    except Exception:
-        pass
-    return False
 
 
 def normalize_record(record: Dict[str, Any]) -> Optional[Dict[str, str]]:
@@ -633,10 +651,6 @@ def scrape_report(scraper_config: ScraperConfig) -> pd.DataFrame:
             page = context.pages[0] if context.pages else context.new_page()
             page.set_default_timeout(20000)
             apply_filters(page, report_date)
-            if not page_contains_report_date(page, report_date):
-                raise DataNotReadyError(
-                    f"Yesterday data marker {report_date.strftime('%Y-%m-%d')} was not found on the page."
-                )
             rows = extract_table_data(page, scraper_config.top_n)
             df = pd.DataFrame(rows, columns=[COL_RANK, COL_CHANGE, COL_GAME])
             if df.empty:
@@ -663,7 +677,7 @@ def run_job(send_not_ready_email: bool = False) -> bool:
         html_body = build_html_table(df, report_date)
         send_email(subject, html_body, email_config)
         mark_sent(report_date)
-        logging.info("Report email sent successfully to %s", email_config.recipient_email)
+        logging.info("Report email sent successfully to %s", ", ".join(email_config.recipient_emails))
         return True
     except DataNotReadyError as exc:
         logging.warning("Yesterday data is not ready yet: %s", exc)
