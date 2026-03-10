@@ -1,4 +1,5 @@
 .env.yuntu
+.playwright-yuntu-profile/
 __pycache__/
 *.pyc
 *.pyo

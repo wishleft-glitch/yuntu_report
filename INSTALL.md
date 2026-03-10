@@ -2,7 +2,7 @@
 
 ## 1. Install Python
 
-Install Python 3.10 or newer and make sure `python` or `py` works in terminal.
+Install Python 3.10 or newer.
 
 ## 2. Open This Folder
 
@@ -13,8 +13,9 @@ cd yuntu_report
 ## 3. Install Dependencies
 
 ```powershell
-pip install -r requirements.txt
-playwright install chromium
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m playwright install chromium
 ```
 
 ## 4. Create Local Config
@@ -30,6 +31,7 @@ Then fill:
 - `SMTP_SENDER`
 - `SMTP_PASSWORD`
 - `MAIL_TO`
+- `PLAYWRIGHT_USER_DATA_DIR`
 
 ## 5. Initialize Login State
 
@@ -37,27 +39,28 @@ Then fill:
 init_yuntu_login.bat
 ```
 
-Log in to Yuntu in the opened browser.
+Log in to Yuntu in the opened browser. Close the browser after login is complete.
 
 ## 6. Test Once
 
 ```powershell
-python scripts\yuntu_bid_report.py --run-once
+.\.venv\Scripts\python.exe scripts\yuntu_bid_report.py --run-once
 ```
 
 ## 7. Start Scheduled Mode
 
 ```powershell
-python scripts\yuntu_bid_report.py --schedule
+.\.venv\Scripts\python.exe scripts\yuntu_bid_report.py --schedule
 ```
 
 ## 8. Optional Windows Autostart
 
 ```powershell
-start_yuntu_report_autostart.bat
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start_yuntu_report_task.ps1
 ```
 
 ## Notes
 
 - `.env.yuntu` is local only
+- `.playwright-yuntu-profile` is local only
 - Browser login state must be recreated on each new device

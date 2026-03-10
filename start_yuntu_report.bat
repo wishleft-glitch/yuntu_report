@@ -1,6 +1,8 @@
 @echo off
 setlocal
 cd /d %~dp0
+set "VENV_PYTHON=%~dp0.venv\Scripts\python.exe"
+set "PLAYWRIGHT_HEADLESS=true"
 
 if not exist .env.yuntu (
   echo Missing .env.yuntu
@@ -9,5 +11,9 @@ if not exist .env.yuntu (
   exit /b 1
 )
 
-python scripts\yuntu_bid_report.py --schedule
+if exist "%VENV_PYTHON%" (
+  "%VENV_PYTHON%" scripts\yuntu_bid_report.py --schedule
+) else (
+  python scripts\yuntu_bid_report.py --schedule
+)
 pause

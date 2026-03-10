@@ -1,15 +1,16 @@
 # Yuntu Report
 
-Custom email automation for OceanEngine Yuntu game APP bid ranking Top 9.
+Custom email automation for OceanEngine Yuntu game APP bid ranking report.
 
 ## Included Files
 
 - `scripts/yuntu_bid_report.py`: scraper, scheduler, mail sender
 - `scripts/init_yuntu_login.py`: login-state initializer
 - `.env.yuntu.example`: local config template
-- `init_yuntu_login.bat`: open browser and save login state
+- `init_yuntu_login.bat`: open a visible browser and save login state
 - `start_yuntu_report.bat`: interactive scheduler start
-- `start_yuntu_report_autostart.bat`: no-prompt launcher for Windows autostart
+- `start_yuntu_report_autostart.bat`: no-prompt scheduler launcher
+- `start_yuntu_report_task.ps1`: helper for Windows Task Scheduler
 
 ## New Device Setup
 
@@ -18,8 +19,9 @@ Custom email automation for OceanEngine Yuntu game APP bid ranking Top 9.
 3. Install dependencies:
 
 ```powershell
-pip install -r requirements.txt
-playwright install chromium
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m playwright install chromium
 ```
 
 4. Create local config:
@@ -35,6 +37,7 @@ copy .env.yuntu.example .env.yuntu
 - `SMTP_SENDER`
 - `SMTP_PASSWORD`
 - `MAIL_TO`
+- `PLAYWRIGHT_USER_DATA_DIR`
 
 6. Initialize login state once:
 
@@ -42,18 +45,18 @@ copy .env.yuntu.example .env.yuntu
 init_yuntu_login.bat
 ```
 
-Log in to Yuntu in the opened browser window. That login state stays on the local machine and is not stored in GitHub.
+Log in to Yuntu in the opened browser window. Close the browser when login is complete, then stop the terminal window if needed. The login state stays on the local machine and is not stored in GitHub.
 
 ## Run Once
 
 ```powershell
-python scripts\yuntu_bid_report.py --run-once
+.\.venv\Scripts\python.exe scripts\yuntu_bid_report.py --run-once
 ```
 
 ## Scheduled Run
 
 ```powershell
-python scripts\yuntu_bid_report.py --schedule
+.\.venv\Scripts\python.exe scripts\yuntu_bid_report.py --schedule
 ```
 
 Behavior:
@@ -64,9 +67,18 @@ Behavior:
 
 ## Windows Autostart
 
-Use `start_yuntu_report_autostart.bat` after local config and login state are ready.
+Recommended: create a Windows Task Scheduler job that runs on user logon and points to:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start_yuntu_report_task.ps1
+```
+
+The helper script avoids duplicate scheduler processes and starts the report job in the background.
 
 ## Notes
 
 - Do not commit `.env.yuntu`
+- Do not commit `.playwright-yuntu-profile`
 - Browser login state must be created again on each new device
+- `init_yuntu_login.bat` forces visible mode for login
+- `start_yuntu_report*.bat` force headless mode for scheduled runs
